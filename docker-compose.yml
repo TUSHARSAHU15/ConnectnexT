@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  # 1. Database Container (MongoDB)
+  mongo:
+    image: mongo:latest
+    container_name: connectx-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - connectx-network
+
+  # 2. Redis Cache Container (Redis)
+  redis:
+    image: redis:alpine
+    container_name: connectx-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - connectx-network
+
+  # 3. Backend API Container
+  backend:
+    build: ./backend
+    container_name: connectx-backend-service
+    ports:
+      - "5000:5000"
+    environment:
+      - PORT=5000
+      - MONGO_URI=mongodb+srv://Tusharsahu:Tushar15@cluster0.pb2mw.mongodb.net/Connectxweb?retryWrites=true&w=majority&appName=Cluster0
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=connectx_jwt_secret_token_key_12345
+      - FRONTEND_URL=http://localhost:5173
+      - CLOUDINARY_CLOUD_NAME=mock
+      - CLOUDINARY_API_KEY=mock
+      - CLOUDINARY_API_SECRET=mock
+      - OPENAI_API_KEY=mock
+    depends_on:
+      - mongo
+      - redis
+    networks:
+      - connectx-network
+
+  # 4. Frontend Web Container
+  frontend:
+    build: ./frontend
+    container_name: connectx-frontend-web
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://localhost:5000/api
+      - VITE_SOCKET_URL=http://localhost:5000
+    depends_on:
+      - backend
+    networks:
+      - connectx-network
+
+volumes:
+  mongo-data:
+
+networks:
+  connectx-network:
+    driver: bridge
