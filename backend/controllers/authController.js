@@ -106,7 +106,7 @@ exports.verifyEmail = async (req, res) => {
       <div style="font-family: sans-serif; text-align: center; padding: 50px;">
         <h1 style="color: #4f46e5;">ConnectX Email Verified!</h1>
         <p>Your email has been successfully verified. You can now close this tab and start chatting.</p>
-        <a href="http://localhost:5173/login" style="background: #4f46e5; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block; margin-top: 20px;">Go to App</a>
+        <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/login" style="background: #4f46e5; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block; margin-top: 20px;">Go to App</a>
       </div>
     `);
   } catch (error) {
@@ -167,7 +167,7 @@ exports.forgotPassword = async (req, res) => {
     await user.save();
 
     // Reset url (frontend URL)
-    const resetUrl = `http://localhost:5173/resetpassword/${resetToken}`;
+    const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/resetpassword/${resetToken}`;
     const message = `You requested a password reset. Please click on the link below:\n\n${resetUrl}\n\nIf you did not request this, please ignore this email.`;
 
     try {
