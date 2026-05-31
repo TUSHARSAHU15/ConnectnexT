@@ -23,7 +23,7 @@ const sendEmail = async (options) => {
   });
 
   const message = {
-    from: `${process.env.FROM_NAME || 'ConnectX'} <${process.env.FROM_EMAIL || 'noreply@connectx.com'}>`,
+    from: `${process.env.FROM_NAME || 'Connect Next'} <${process.env.FROM_EMAIL || 'noreply@connectnext.com'}>`,
     to: options.email,
     subject: options.subject,
     text: options.message,

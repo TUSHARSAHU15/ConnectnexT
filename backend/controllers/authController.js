@@ -39,12 +39,12 @@ exports.registerUser = async (req, res) => {
     if (user) {
       // Create verification url
       const verificationUrl = `${req.protocol}://${req.get('host')}/api/auth/verify/${verificationToken}`;
-      const message = `Welcome to ConnectX!\n\nPlease verify your email by clicking on the link below:\n\n${verificationUrl}\n\nThis link is valid for 24 hours.`;
+      const message = `Welcome to Connect Next!\n\nPlease verify your email by clicking on the link below:\n\n${verificationUrl}\n\nThis link is valid for 24 hours.`;
 
       try {
         await sendEmail({
           email: user.email,
-          subject: 'ConnectX Email Verification',
+          subject: 'Connect Next Email Verification',
           message,
         });
 
@@ -104,7 +104,7 @@ exports.verifyEmail = async (req, res) => {
     // Redirect to frontend login/verification success page or show beautiful HTML
     res.send(`
       <div style="font-family: sans-serif; text-align: center; padding: 50px;">
-        <h1 style="color: #4f46e5;">ConnectX Email Verified!</h1>
+        <h1 style="color: #4f46e5;">Connect Next Email Verified!</h1>
         <p>Your email has been successfully verified. You can now close this tab and start chatting.</p>
         <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/login" style="background: #4f46e5; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block; margin-top: 20px;">Go to App</a>
       </div>
@@ -173,7 +173,7 @@ exports.forgotPassword = async (req, res) => {
     try {
       await sendEmail({
         email: user.email,
-        subject: 'ConnectX Password Reset Request',
+        subject: 'Connect Next Password Reset Request',
         message,
       });
 

@@ -58,7 +58,7 @@ export default function Register() {
             <MessageSquare className="w-6 h-6 text-indigo-400" />
           </div>
           <h1 className="text-3xl font-bold tracking-tight text-white">Create Account</h1>
-          <p className="text-sm text-zinc-400 mt-1">Get started with ConnectX platform</p>
+          <p className="text-sm text-zinc-400 mt-1">Get started with Connect Next platform</p>
         </div>
 
         {errorMsg && (

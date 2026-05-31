@@ -47,7 +47,7 @@ app.use(express.urlencoded({ extended: true }));
 
 // Test Route
 app.get('/', (req, res) => {
-  res.send('ConnectX Backend API Running...');
+  res.send('Connect Next Backend API Running...');
 });
 
 // Mount Routes
@@ -108,5 +108,5 @@ socketHandler(io);
 // Listen on Port
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
-  console.log(`ConnectX server running in production mode on port ${PORT}`);
+  console.log(`Connect Next server running in production mode on port ${PORT}`);
 });

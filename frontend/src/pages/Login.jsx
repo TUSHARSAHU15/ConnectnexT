@@ -48,7 +48,7 @@ export default function Login() {
           <div className="w-12 h-12 rounded-xl bg-indigo-600/20 flex items-center justify-center border border-indigo-500/20 mb-4 animate-pulse-slow">
             <MessageSquare className="w-6 h-6 text-indigo-400" />
           </div>
-          <h1 className="text-3xl font-bold tracking-tight text-white">ConnectX</h1>
+          <h1 className="text-3xl font-bold tracking-tight text-white">Connect Next</h1>
           <p className="text-sm text-zinc-400 mt-1">Real-Time Chat & Collaboration</p>
         </div>
 
@@ -115,7 +115,7 @@ export default function Login() {
         </form>
 
         <p className="mt-8 text-center text-sm text-zinc-400">
-          New to ConnectX?{' '}
+          New to Connect Next?{' '}
           <Link to="/register" className="font-semibold text-indigo-400 hover:text-indigo-300 transition-colors">
             Create an account
           </Link>

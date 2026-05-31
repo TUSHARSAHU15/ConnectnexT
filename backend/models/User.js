@@ -28,7 +28,7 @@ const userSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      default: 'Hey there! I am using ConnectX.',
+      default: 'Hey there! I am using Connect Next.',
     },
     isOnline: {
       type: Boolean,
