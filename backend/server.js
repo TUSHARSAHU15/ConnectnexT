@@ -86,7 +86,7 @@ try {
   const pubClient = createClient({ url: redisUrl });
   const subClient = pubClient.duplicate();
 
-  pubClient.on('error', (err) => console.log('Redis connection error, using local socket adapter fallback.'));
+  pubClient.on('error', (err) => {});
   subClient.on('error', (err) => {});
 
   Promise.all([pubClient.connect(), subClient.connect()]).then(() => {
