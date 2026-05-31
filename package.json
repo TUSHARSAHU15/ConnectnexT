@@ -1,0 +1,7 @@
+{
+  "name": "connectnext-root",
+  "private": true,
+  "scripts": {
+    "build": "npm install --prefix frontend --legacy-peer-deps && npm run build --prefix frontend"
+  }
+}
