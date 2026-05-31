@@ -31,7 +31,8 @@ const getMockSummary = (messages) => {
 // @route   POST /api/messages
 // @access  Private
 exports.sendMessage = async (req, res) => {
-  const { content, chatId, mediaUrl, mediaType, parentMessageId } = req.body;
+  const { content, mediaUrl, mediaType, parentMessageId } = req.body;
+  const chatId = req.body.chatId || req.body.channelId;
 
   if ((!content && !mediaUrl) || !chatId) {
     return res.status(400).json({ success: false, message: 'Invalid data passed into request' });

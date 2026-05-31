@@ -95,9 +95,19 @@ export default function Dashboard() {
     incomingCall
   } = useSelector((state) => state.chat);
 
-  // Active view section
-  const [currentView, setCurrentView] = useState('chat'); // 'chat', 'kanban', 'meetings'
+  const [currentView, setCurrentView] = useState('chat'); // 'chat', 'kanban', 'meetings', 'friends'
   const [userPresence, setUserPresence] = useState('Online'); // Online, Away, Busy, Offline
+
+  // Friends & DM System States
+  const [friendsList, setFriendsList] = useState([]);
+  const [friendRequests, setFriendRequests] = useState([]);
+  const [friendsFilter, setFriendsFilter] = useState('online'); // 'online', 'all', 'pending', 'add'
+  const [friendEmailInput, setFriendEmailInput] = useState('');
+  const [friendRequestStatus, setFriendRequestStatus] = useState({ success: null, message: '' });
+  const [friendSearchQuery, setFriendSearchQuery] = useState('');
+  const [directChatsList, setDirectChatsList] = useState([]);
+  const [selectedDirectChat, setSelectedDirectChat] = useState(null);
+
   
   // Sidebar states
   const [searchTerm, setSearchTerm] = useState('');
@@ -154,6 +164,128 @@ export default function Dashboard() {
     } catch (e) {}
   };
 
+  const loadFriendsData = async () => {
+    try {
+      const friendsData = await api.getFriends();
+      if (friendsData.success) {
+        setFriendsList(friendsData.data);
+      }
+      const requestsData = await api.getFriendRequests();
+      if (requestsData.success) {
+        setFriendRequests(requestsData.data);
+      }
+      const chatsData = await api.getDirectChats();
+      if (chatsData.success) {
+        setDirectChatsList(chatsData.data);
+      }
+    } catch (err) {
+      console.error('Error loading friends:', err);
+    }
+  };
+
+  const handleSendFriendRequest = async (e) => {
+    e.preventDefault();
+    if (!friendEmailInput.trim()) return;
+    setFriendRequestStatus({ success: null, message: '' });
+
+    try {
+      const data = await api.sendFriendRequest(friendEmailInput);
+      if (data.success) {
+        setFriendRequestStatus({ success: true, message: 'Friend request sent successfully!' });
+        setFriendEmailInput('');
+        loadFriendsData();
+        // Emit Socket Event to notify recipient
+        socket?.emit('new_friend_request', {
+          senderId: user._id,
+          recipientId: data.data.recipient._id,
+          requestData: data.data
+        });
+      } else {
+        setFriendRequestStatus({ success: false, message: data.message || 'Failed to send request.' });
+      }
+    } catch (err) {
+      setFriendRequestStatus({ success: false, message: 'An error occurred. User might not exist.' });
+    }
+  };
+
+  const handleAcceptFriendRequest = async (requestId, senderId) => {
+    try {
+      const data = await api.acceptFriendRequest(requestId);
+      if (data.success) {
+        loadFriendsData();
+        // Emit Socket Event to notify sender
+        socket?.emit('friend_request_approved', {
+          senderId: senderId,
+          recipientId: user._id,
+          recipientUser: user
+        });
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleRejectFriendRequest = async (requestId) => {
+    try {
+      const data = await api.rejectFriendRequest(requestId);
+      if (data.success) {
+        loadFriendsData();
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleRemoveFriend = async (friendId) => {
+    try {
+      const data = await api.removeFriend(friendId);
+      if (data.success) {
+        loadFriendsData();
+        // Emit Socket Event to notify friend
+        socket?.emit('friend_removed', { friendId, userId: user._id });
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleStartDirectChat = async (friend) => {
+    try {
+      const data = await api.accessChat(friend._id);
+      if (data.success) {
+        const chat = data.data;
+        setSelectedDirectChat(chat);
+        dispatch(setActiveWorkspace(null)); // Deactivate active workspace
+        
+        // Fetch 1-to-1 chat messages
+        const msgsData = await api.getMessages(chat._id);
+        if (msgsData.success) {
+          dispatch(fetchMessagesSuccess(msgsData.data));
+          socket?.emit('join_room', chat._id);
+          setAiSuggestions([]);
+          setAiSummary('');
+        }
+        
+        // Refresh conversations list
+        const chatsData = await api.getDirectChats();
+        if (chatsData.success) {
+          setDirectChatsList(chatsData.data);
+        }
+        
+        setCurrentView('chat'); // Switch to main timeline chat layout
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleSelectHome = () => {
+    dispatch(setActiveWorkspace(null));
+    setSelectedDirectChat(null);
+    setCurrentView('friends');
+    loadFriendsData();
+  };
+
   // 1. Initial Load Workspaces
   useEffect(() => {
     if (!user) {
@@ -161,6 +293,7 @@ export default function Dashboard() {
       return;
     }
     loadWorkspaces();
+    loadFriendsData();
   }, [user]);
 
   const loadWorkspaces = async () => {
@@ -241,7 +374,7 @@ export default function Dashboard() {
 
   // 3. Sockethandshake & Mentions listeners
   useEffect(() => {
-    if (!user || !activeWorkspace) return;
+    if (!user) return;
 
     socket = io(SOCKET_ENDPOINT);
     socket.emit('setup', { user, statusType: userPresence });
@@ -255,6 +388,8 @@ export default function Dashboard() {
 
     socket.on('receive_message', (newMessage) => {
       if (selectedChannel && selectedChannel._id === newMessage.channel) {
+        dispatch(addMessageSuccess(newMessage));
+      } else if (selectedDirectChat && (selectedDirectChat._id === newMessage.chat || selectedDirectChat._id === newMessage.chat?._id)) {
         dispatch(addMessageSuccess(newMessage));
       } else {
         playNotificationSound();
@@ -271,12 +406,29 @@ export default function Dashboard() {
       dispatch(updatePresence({ userId, presence }));
       // Reload workspace members to capture online pills updates
       reloadWorkspaceMembers();
+      // Reload friends list to sync presence online states
+      loadFriendsData();
+    });
+
+    // Friends WebSocket Listeners
+    socket.on('friend_request_received', (requestData) => {
+      playNotificationSound();
+      loadFriendsData();
+    });
+
+    socket.on('friend_request_accepted', ({ recipientId, recipientUser }) => {
+      playNotificationSound();
+      loadFriendsData();
+    });
+
+    socket.on('unfriended_by_user', ({ userId }) => {
+      loadFriendsData();
     });
 
     return () => {
       socket.disconnect();
     };
-  }, [user, activeWorkspace, selectedChannel]);
+  }, [user, activeWorkspace, selectedChannel, selectedDirectChat]);
 
   const reloadWorkspaceMembers = async () => {
     try {
@@ -364,14 +516,16 @@ export default function Dashboard() {
   // Send message
   const handleSendMessage = async (e) => {
     e?.preventDefault();
+    const activeTargetId = selectedChannel?._id || selectedDirectChat?._id;
+    if (!activeTargetId) return;
     if (!messageInput.trim() && !attachedFileUrl) return;
 
     try {
-      socket.emit('stop_typing', { room: selectedChannel._id, senderId: user._id });
+      socket?.emit('stop_typing', { room: activeTargetId, senderId: user._id });
       setTyping(false);
 
       const response = await api.sendMessage(
-        selectedChannel._id,
+        activeTargetId,
         messageInput,
         attachedFileUrl,
         attachedFileType,
@@ -380,7 +534,7 @@ export default function Dashboard() {
 
       if (response.success) {
         dispatch(addMessageSuccess(response.data));
-        socket.emit('send_message', response.data);
+        socket?.emit('send_message', response.data);
         setMessageInput('');
         setAttachedFileUrl('');
         setAttachedFileType('text');
@@ -602,95 +756,186 @@ export default function Dashboard() {
         onCreateWorkspace={handleCreateWorkspace}
       />
 
-      {/* 2. Workspace Scoped Sidebar */}
+      {/* 2. Workspace / Home Sidebar */}
       <div className="w-64 h-full bg-zinc-950/80 border-r border-zinc-900 flex flex-col shrink-0">
         
-        {/* Workspace details header */}
-        <div className="p-4 border-b border-zinc-900/60 flex items-center justify-between">
-          <div className="min-w-0">
-            <h2 className="text-sm font-bold truncate text-white uppercase tracking-wider">{activeWorkspace?.name || 'Workspace'}</h2>
-            <p className="text-[10px] text-zinc-500 truncate">{activeWorkspace?.description || 'Active Enterprise tenant'}</p>
-          </div>
-          <span className="text-[9px] px-2 py-0.5 rounded bg-indigo-600/20 text-indigo-400 font-bold shrink-0">
-            {activeUserRole}
-          </span>
-        </div>
-
-        {/* Global tabs list (Chat timelines, Kanban board, Scheduler) */}
-        <div className="p-3 space-y-1">
-          <button
-            onClick={() => setCurrentView('chat')}
-            className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold rounded-xl transition-all ${currentView === 'chat' ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/10' : 'hover:bg-zinc-900/60 text-zinc-400 hover:text-white'}`}
-          >
-            <MessageSquare className="w-4 h-4 shrink-0" />
-            <span>Workspace Channels</span>
-          </button>
-          
-          <button
-            onClick={() => setCurrentView('kanban')}
-            className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold rounded-xl transition-all ${currentView === 'kanban' ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/10' : 'hover:bg-zinc-900/60 text-zinc-400 hover:text-white'}`}
-          >
-            <Layout className="w-4 h-4 shrink-0" />
-            <span>Kanban Board</span>
-          </button>
-
-          <button
-            onClick={() => setCurrentView('meetings')}
-            className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold rounded-xl transition-all ${currentView === 'meetings' ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/10' : 'hover:bg-zinc-900/60 text-zinc-400 hover:text-white'}`}
-          >
-            <CalendarIcon className="w-4 h-4 shrink-0" />
-            <span>Scheduler slots</span>
-          </button>
-        </div>
-
-        {/* Scoped Sidebar Details based on active Tab */}
-        {currentView === 'chat' && (
-          <div className="flex-1 flex flex-col min-h-0">
-            
-            {/* Channels listing section */}
-            <div className="flex items-center justify-between px-4 py-2 text-[10px] uppercase tracking-widest font-bold text-zinc-500 mt-2 shrink-0">
-              <span>Timeline Feeds</span>
-              {['Owner', 'Admin', 'Manager'].includes(activeUserRole) && (
-                <button onClick={() => setShowChannelModal(true)} className="p-0.5 hover:text-white" title="Launch Channel">
-                  <Plus className="w-3.5 h-3.5" />
-                </button>
-              )}
+        {activeWorkspace ? (
+          <>
+            {/* Workspace details header */}
+            <div className="p-4 border-b border-zinc-900/60 flex items-center justify-between">
+              <div className="min-w-0">
+                <h2 className="text-sm font-bold truncate text-white uppercase tracking-wider">{activeWorkspace.name}</h2>
+                <p className="text-[10px] text-zinc-500 truncate">{activeWorkspace.description || 'Active Enterprise tenant'}</p>
+              </div>
+              <span className="text-[9px] px-2 py-0.5 rounded bg-indigo-600/20 text-indigo-400 font-bold shrink-0">
+                {activeUserRole}
+              </span>
             </div>
 
-            <div className="flex-1 overflow-y-auto px-2 space-y-0.5">
-              {channels.map((chan) => {
-                const isSelected = selectedChannel?._id === chan._id;
-                return (
-                  <button
-                    key={chan._id}
-                    onClick={() => handleChannelSelect(chan)}
-                    className={`w-full flex items-center justify-between px-3 py-2 text-xs font-medium rounded-xl transition-all ${isSelected ? 'bg-zinc-900 text-white font-semibold' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/30'}`}
+            {/* Global tabs list (Chat timelines, Kanban board, Scheduler) */}
+            <div className="p-3 space-y-1">
+              <button
+                onClick={() => setCurrentView('chat')}
+                className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold rounded-xl transition-all ${currentView === 'chat' ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/10' : 'hover:bg-zinc-900/60 text-zinc-400 hover:text-white'}`}
+              >
+                <MessageSquare className="w-4 h-4 shrink-0" />
+                <span>Workspace Channels</span>
+              </button>
+              
+              <button
+                onClick={() => setCurrentView('kanban')}
+                className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold rounded-xl transition-all ${currentView === 'kanban' ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/10' : 'hover:bg-zinc-900/60 text-zinc-400 hover:text-white'}`}
+              >
+                <Layout className="w-4 h-4 shrink-0" />
+                <span>Kanban Board</span>
+              </button>
+
+              <button
+                onClick={() => setCurrentView('meetings')}
+                className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold rounded-xl transition-all ${currentView === 'meetings' ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/10' : 'hover:bg-zinc-900/60 text-zinc-400 hover:text-white'}`}
+              >
+                <CalendarIcon className="w-4 h-4 shrink-0" />
+                <span>Scheduler slots</span>
+              </button>
+            </div>
+
+            {/* Scoped Sidebar Details based on active Tab */}
+            {currentView === 'chat' && (
+              <div className="flex-1 flex flex-col min-h-0">
+                
+                {/* Channels listing section */}
+                <div className="flex items-center justify-between px-4 py-2 text-[10px] uppercase tracking-widest font-bold text-zinc-500 mt-2 shrink-0">
+                  <span>Timeline Feeds</span>
+                  {['Owner', 'Admin', 'Manager'].includes(activeUserRole) && (
+                    <button onClick={() => setShowChannelModal(true)} className="p-0.5 hover:text-white" title="Launch Channel">
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex-1 overflow-y-auto px-2 space-y-0.5">
+                  {channels.map((chan) => {
+                    const isSelected = selectedChannel?._id === chan._id;
+                    return (
+                      <button
+                        key={chan._id}
+                        onClick={() => handleChannelSelect(chan)}
+                        className={`w-full flex items-center justify-between px-3 py-2 text-xs font-medium rounded-xl transition-all ${isSelected ? 'bg-zinc-900 text-white font-semibold' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/30'}`}
+                      >
+                        <span className="truncate"># {chan.channelName}</span>
+                        {chan.isPrivate && <span className="text-[8px] uppercase tracking-wider text-amber-500 font-bold shrink-0">Private</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Profile online/presence selector */}
+                <div className="p-4 border-t border-zinc-900/60 bg-zinc-950/20 shrink-0">
+                  <div className="flex items-center gap-2">
+                    <span className={`w-2.5 h-2.5 rounded-full ${userPresence === 'Online' ? 'bg-emerald-500 glow-green' : userPresence === 'Away' ? 'bg-amber-500' : userPresence === 'Busy' ? 'bg-rose-500' : 'bg-zinc-600'}`} />
+                    <select
+                      value={userPresence}
+                      onChange={(e) => handlePresenceChange(e.target.value)}
+                      className="bg-transparent text-[11px] text-zinc-300 font-semibold focus:outline-none border-none cursor-pointer"
+                    >
+                      <option value="Online" className="bg-zinc-950 text-white">Online</option>
+                      <option value="Away" className="bg-zinc-950 text-white">Away</option>
+                      <option value="Busy" className="bg-zinc-950 text-white">Busy</option>
+                      <option value="Offline" className="bg-zinc-950 text-white">Offline</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            {/* Discord Style Home Header */}
+            <div className="p-4 border-b border-zinc-900/60 flex items-center justify-between shrink-0">
+              <h2 className="text-sm font-bold text-white uppercase tracking-wider">Home</h2>
+              <span className="text-[9px] px-2 py-0.5 rounded bg-zinc-800 text-zinc-400 font-bold">
+                Direct Messages
+              </span>
+            </div>
+
+            {/* Home Side Menu */}
+            <div className="p-3 space-y-1 shrink-0">
+              <button
+                onClick={() => setCurrentView('friends')}
+                className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold rounded-xl transition-all ${currentView === 'friends' ? 'bg-indigo-600/10 text-indigo-400 border border-indigo-500/10' : 'hover:bg-zinc-900/60 text-zinc-400 hover:text-white'}`}
+              >
+                <Users className="w-4 h-4 shrink-0 text-indigo-400" />
+                <span>Friends</span>
+              </button>
+            </div>
+
+            {/* Direct Messages List */}
+            <div className="flex-1 flex flex-col min-h-0">
+              <div className="flex items-center justify-between px-4 py-2 text-[10px] uppercase tracking-widest font-bold text-zinc-500 mt-2 shrink-0">
+                <span>Direct Messages</span>
+              </div>
+
+              <div className="flex-1 overflow-y-auto px-2 space-y-0.5">
+                {directChatsList.length === 0 ? (
+                  <p className="text-[10px] text-zinc-600 px-3 py-4 text-center">No active direct chats.<br/>Add a friend and start chatting!</p>
+                ) : (
+                  directChatsList.map((chat) => {
+                    const otherParticipant = chat.participants.find(p => p._id !== user._id) || { name: 'Chat Room', avatar: '', isOnline: false };
+                    const isSelected = selectedDirectChat?._id === chat._id && currentView === 'chat';
+                    const otherParticipantPresence = onlinePresenceMap[otherParticipant._id] || (otherParticipant.isOnline ? 'Online' : 'Offline');
+
+                    return (
+                      <button
+                        key={chat._id}
+                        onClick={async () => {
+                          setSelectedDirectChat(chat);
+                          dispatch(setActiveWorkspace(null));
+                          const msgsData = await api.getMessages(chat._id);
+                          if (msgsData.success) {
+                            dispatch(fetchMessagesSuccess(msgsData.data));
+                            socket?.emit('join_room', chat._id);
+                            setAiSuggestions([]);
+                            setAiSummary('');
+                          }
+                          setCurrentView('chat');
+                        }}
+                        className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium rounded-xl transition-all ${isSelected ? 'bg-zinc-900 text-white font-semibold' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/30'}`}
+                      >
+                        <div className="relative shrink-0">
+                          <div className="w-5 h-5 rounded-md overflow-hidden bg-zinc-800 flex items-center justify-center font-bold text-[10px]">
+                            {otherParticipant.avatar ? (
+                              <img src={otherParticipant.avatar} alt="" className="w-full h-full object-cover" />
+                            ) : (
+                              otherParticipant.name.charAt(0)
+                            )}
+                          </div>
+                          <span className={`absolute bottom-[-2px] right-[-2px] w-2.5 h-2.5 rounded-full border border-zinc-950 ${otherParticipantPresence === 'Online' ? 'bg-emerald-500 glow-green' : otherParticipantPresence === 'Away' ? 'bg-amber-500' : otherParticipantPresence === 'Busy' ? 'bg-rose-500' : 'bg-zinc-600'}`} />
+                        </div>
+                        <span className="truncate flex-1 text-left">{otherParticipant.name}</span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Profile online/presence selector */}
+              <div className="p-4 border-t border-zinc-900/60 bg-zinc-950/20 shrink-0">
+                <div className="flex items-center gap-2">
+                  <span className={`w-2.5 h-2.5 rounded-full ${userPresence === 'Online' ? 'bg-emerald-500 glow-green' : userPresence === 'Away' ? 'bg-amber-500' : userPresence === 'Busy' ? 'bg-rose-500' : 'bg-zinc-600'}`} />
+                  <select
+                    value={userPresence}
+                    onChange={(e) => handlePresenceChange(e.target.value)}
+                    className="bg-transparent text-[11px] text-zinc-300 font-semibold focus:outline-none border-none cursor-pointer"
                   >
-                    <span className="truncate"># {chan.channelName}</span>
-                    {chan.isPrivate && <span className="text-[8px] uppercase tracking-wider text-amber-500 font-bold shrink-0">Private</span>}
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Profile online/presence selector (Step 4 Presence options) */}
-            <div className="p-4 border-t border-zinc-900/60 bg-zinc-950/20 shrink-0">
-              <div className="flex items-center gap-2">
-                <span className={`w-2.5 h-2.5 rounded-full ${userPresence === 'Online' ? 'bg-emerald-500 glow-green' : userPresence === 'Away' ? 'bg-amber-500' : userPresence === 'Busy' ? 'bg-rose-500' : 'bg-zinc-600'}`} />
-                <select
-                  value={userPresence}
-                  onChange={(e) => handlePresenceChange(e.target.value)}
-                  className="bg-transparent text-[11px] text-zinc-300 font-semibold focus:outline-none border-none cursor-pointer"
-                >
-                  <option value="Online" className="bg-zinc-950 text-white">Online</option>
-                  <option value="Away" className="bg-zinc-950 text-white">Away</option>
-                  <option value="Busy" className="bg-zinc-950 text-white">Busy</option>
-                  <option value="Offline" className="bg-zinc-950 text-white">Offline</option>
-                </select>
+                    <option value="Online" className="bg-zinc-950 text-white">Online</option>
+                    <option value="Away" className="bg-zinc-950 text-white">Away</option>
+                    <option value="Busy" className="bg-zinc-950 text-white">Busy</option>
+                    <option value="Offline" className="bg-zinc-950 text-white">Offline</option>
+                  </select>
+                </div>
               </div>
             </div>
-
-          </div>
+          </>
         )}
 
         {(currentView === 'kanban' || currentView === 'meetings') && (
@@ -728,13 +973,22 @@ export default function Dashboard() {
         
         {/* Scoped View Timeline Router */}
         {currentView === 'chat' && (
-          selectedChannel ? (
+          (selectedChannel || selectedDirectChat) ? (
             <>
               {/* Timeline Room Header */}
               <div className="h-16 border-b border-zinc-900/60 flex items-center justify-between px-6 bg-zinc-950/20 shrink-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-base font-bold text-white"># {selectedChannel.channelName}</span>
-                  <span className="text-[10px] text-zinc-500 truncate max-w-[200px]"> - {selectedChannel.description || 'Channel timeline'}</span>
+                  {selectedChannel ? (
+                    <>
+                      <span className="text-base font-bold text-white"># {selectedChannel.channelName}</span>
+                      <span className="text-[10px] text-zinc-500 truncate max-w-[200px]"> - {selectedChannel.description || 'Workspace channel'}</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-base font-bold text-white">@ {selectedDirectChat.participants.find(p => p._id !== user._id)?.name || 'Direct Chat'}</span>
+                      <span className="text-[10px] text-zinc-500 truncate max-w-[200px]"> - Direct Messaging</span>
+                    </>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-3">
@@ -1054,7 +1308,6 @@ export default function Dashboard() {
                 </div>
               </form>
             </>
-          ) : (
             <div className="flex-1 flex flex-col items-center justify-center text-center p-8 relative overflow-hidden">
               <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 rounded-full bg-indigo-600/5 blur-[120px] pointer-events-none" />
 
@@ -1062,9 +1315,13 @@ export default function Dashboard() {
                 <MessageSquare className="w-8 h-8" />
               </div>
 
-              <h2 className="text-xl font-bold tracking-tight text-white mb-2">#{activeWorkspace?.name || 'Workspace'} timeline</h2>
+              <h2 className="text-xl font-bold tracking-tight text-white mb-2">
+                {activeWorkspace ? `#${activeWorkspace.name} timeline` : 'Direct Messaging Hub'}
+              </h2>
               <p className="text-xs text-zinc-500 max-w-xs leading-relaxed">
-                Add or launch a workspace channel from the left thread list to coordinate in real-time.
+                {activeWorkspace 
+                  ? 'Add or launch a workspace channel from the left thread list to coordinate in real-time.' 
+                  : 'Select an active direct message conversation from the sidebar, or add a friend to start chatting in private.'}
               </p>
             </div>
           )
@@ -1089,63 +1346,352 @@ export default function Dashboard() {
           />
         )}
 
+        {currentView === 'friends' && (
+          <div className="flex-1 flex flex-col bg-zinc-950/40 relative overflow-hidden">
+            {/* Friends Top Navigation Bar */}
+            <div className="h-16 border-b border-zinc-900/60 flex items-center justify-between px-6 bg-zinc-950/20 shrink-0">
+              <div className="flex items-center gap-3">
+                <Users className="w-5 h-5 text-indigo-400" />
+                <span className="text-sm font-bold text-white uppercase tracking-wider">Friends</span>
+                
+                <div className="w-[1px] h-4 bg-zinc-800 mx-2" />
+
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setFriendsFilter('online')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${friendsFilter === 'online' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:bg-zinc-900/50 hover:text-zinc-200'}`}
+                  >
+                    Online
+                  </button>
+                  <button
+                    onClick={() => setFriendsFilter('all')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${friendsFilter === 'all' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:bg-zinc-900/50 hover:text-zinc-200'}`}
+                  >
+                    All
+                  </button>
+                  <button
+                    onClick={() => setFriendsFilter('pending')}
+                    className={`relative px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${friendsFilter === 'pending' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:bg-zinc-900/50 hover:text-zinc-200'}`}
+                  >
+                    Pending
+                    {friendRequests.length > 0 && (
+                      <span className="absolute top-0 right-0 w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+                    )}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setFriendsFilter('add');
+                      setFriendRequestStatus({ success: null, message: '' });
+                    }}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${friendsFilter === 'add' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/10' : 'bg-emerald-600/10 text-emerald-400 hover:bg-emerald-600 hover:text-white'}`}
+                  >
+                    Add Friend
+                  </button>
+                </div>
+              </div>
+
+              {/* Search Bar for friends */}
+              {friendsFilter !== 'add' && (
+                <div className="relative w-48 shrink-0">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500" />
+                  <input
+                    type="text"
+                    placeholder="Search friends..."
+                    value={friendSearchQuery}
+                    onChange={(e) => setFriendSearchQuery(e.target.value)}
+                    className="w-full pl-9 pr-4 py-1.5 rounded-xl glass-input text-xs text-white"
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Friends Content Scroll Container */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              
+              {/* ADD FRIEND TAB VIEW */}
+              {friendsFilter === 'add' && (
+                <div className="max-w-md bg-zinc-950/40 border border-zinc-900 rounded-2xl p-6 space-y-4">
+                  <div className="space-y-1.5">
+                    <h3 className="text-sm font-bold text-white uppercase tracking-wider">Add Friend</h3>
+                    <p className="text-xs text-zinc-500 leading-relaxed">
+                      You can add friends with their email address. Email addresses are case-insensitive.
+                    </p>
+                  </div>
+
+                  <form onSubmit={handleSendFriendRequest} className="flex gap-2">
+                    <input
+                      type="email"
+                      required
+                      placeholder="friend@example.com"
+                      value={friendEmailInput}
+                      onChange={(e) => setFriendEmailInput(e.target.value)}
+                      className="flex-1 px-4 py-2 rounded-xl glass-input text-xs text-white"
+                    />
+                    <button
+                      type="submit"
+                      className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-lg hover:shadow-emerald-500/10 shrink-0"
+                    >
+                      Send request
+                    </button>
+                  </form>
+
+                  {friendRequestStatus.message && (
+                    <div className={`p-3 rounded-xl border text-xs font-semibold ${friendRequestStatus.success ? 'bg-emerald-600/5 border-emerald-500/20 text-emerald-400' : 'bg-rose-600/5 border-rose-500/20 text-rose-400'}`}>
+                      {friendRequestStatus.message}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* PENDING REQUESTS TAB VIEW */}
+              {friendsFilter === 'pending' && (
+                <div className="space-y-6">
+                  {/* Incoming Requests */}
+                  <div className="space-y-3">
+                    <span className="text-[10px] uppercase tracking-widest font-bold text-zinc-500 block">
+                      Incoming Requests ({friendRequests.filter(r => r.recipient._id === user._id).length})
+                    </span>
+
+                    {friendRequests.filter(r => r.recipient._id === user._id).length === 0 ? (
+                      <p className="text-xs text-zinc-600">No incoming friend requests.</p>
+                    ) : (
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {friendRequests
+                          .filter(r => r.recipient._id === user._id)
+                          .map((req) => (
+                            <div key={req._id} className="p-3 rounded-2xl bg-zinc-950/40 border border-zinc-900 flex items-center justify-between gap-3">
+                              <div className="flex items-center gap-3 min-w-0">
+                                <div className="w-9 h-9 rounded-xl bg-zinc-800 flex items-center justify-center font-bold text-sm text-zinc-300 overflow-hidden shrink-0">
+                                  {req.sender.avatar ? (
+                                    <img src={req.sender.avatar} alt="" className="w-full h-full object-cover" />
+                                  ) : (
+                                    req.sender.name.charAt(0)
+                                  )}
+                                </div>
+                                <div className="min-w-0">
+                                  <p className="text-xs font-bold text-white truncate">{req.sender.name}</p>
+                                  <p className="text-[10px] text-zinc-500 truncate">{req.sender.email}</p>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <button
+                                  onClick={() => handleAcceptFriendRequest(req._id, req.sender._id)}
+                                  className="p-1.5 rounded-lg bg-emerald-600/10 text-emerald-400 hover:bg-emerald-600 hover:text-white transition-all"
+                                  title="Accept request"
+                                >
+                                  <Check className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => handleRejectFriendRequest(req._id)}
+                                  className="p-1.5 rounded-lg bg-rose-600/10 text-rose-400 hover:bg-rose-600 hover:text-white transition-all"
+                                  title="Decline request"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Outgoing Requests */}
+                  <div className="space-y-3">
+                    <span className="text-[10px] uppercase tracking-widest font-bold text-zinc-500 block">
+                      Sent Requests ({friendRequests.filter(r => r.sender._id === user._id).length})
+                    </span>
+
+                    {friendRequests.filter(r => r.sender._id === user._id).length === 0 ? (
+                      <p className="text-xs text-zinc-600">No sent friend requests.</p>
+                    ) : (
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {friendRequests
+                          .filter(r => r.sender._id === user._id)
+                          .map((req) => (
+                            <div key={req._id} className="p-3 rounded-2xl bg-zinc-950/40 border border-zinc-900 flex items-center justify-between gap-3">
+                              <div className="flex items-center gap-3 min-w-0">
+                                <div className="w-9 h-9 rounded-xl bg-zinc-800 flex items-center justify-center font-bold text-sm text-zinc-300 overflow-hidden shrink-0">
+                                  {req.recipient.avatar ? (
+                                    <img src={req.recipient.avatar} alt="" className="w-full h-full object-cover" />
+                                  ) : (
+                                    req.recipient.name.charAt(0)
+                                  )}
+                                </div>
+                                <div className="min-w-0">
+                                  <p className="text-xs font-bold text-white truncate">{req.recipient.name}</p>
+                                  <p className="text-[10px] text-zinc-500 truncate">{req.recipient.email}</p>
+                                </div>
+                              </div>
+
+                              <button
+                                onClick={() => handleRejectFriendRequest(req._id)}
+                                className="p-1.5 rounded-lg bg-zinc-900 hover:bg-rose-650 hover:text-white text-zinc-400 transition-all shrink-0"
+                                title="Cancel request"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          ))}
+                      </div>
+                    )}
+                  </div>
+
+                </div>
+              )}
+
+              {/* ONLINE & ALL FRIENDS LIST VIEW */}
+              {friendsFilter !== 'add' && friendsFilter !== 'pending' && (
+                <div className="space-y-3">
+                  <span className="text-[10px] uppercase tracking-widest font-bold text-zinc-500 block">
+                    {friendsFilter === 'online' ? 'Online' : 'All'} Friends ({
+                      friendsList.filter((f) => {
+                        const presence = onlinePresenceMap[f._id] || (f.isOnline ? 'Online' : 'Offline');
+                        const matchesSearch = f.name.toLowerCase().includes(friendSearchQuery.toLowerCase()) || f.email.toLowerCase().includes(friendSearchQuery.toLowerCase());
+                        if (friendsFilter === 'online') {
+                          return presence !== 'Offline' && matchesSearch;
+                        }
+                        return matchesSearch;
+                      }).length
+                    })
+                  </span>
+
+                  {friendsList.filter((f) => {
+                    const presence = onlinePresenceMap[f._id] || (f.isOnline ? 'Online' : 'Offline');
+                    const matchesSearch = f.name.toLowerCase().includes(friendSearchQuery.toLowerCase()) || f.email.toLowerCase().includes(friendSearchQuery.toLowerCase());
+                    if (friendsFilter === 'online') {
+                      return presence !== 'Offline' && matchesSearch;
+                    }
+                    return matchesSearch;
+                  }).length === 0 ? (
+                    <div className="p-8 text-center bg-zinc-950/15 border border-dashed border-zinc-900 rounded-2xl">
+                      <p className="text-xs text-zinc-650">No friends found matching active filters.</p>
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-zinc-900/60 border border-zinc-900 rounded-2xl overflow-hidden bg-zinc-950/15">
+                      {friendsList
+                        .filter((f) => {
+                          const presence = onlinePresenceMap[f._id] || (f.isOnline ? 'Online' : 'Offline');
+                          const matchesSearch = f.name.toLowerCase().includes(friendSearchQuery.toLowerCase()) || f.email.toLowerCase().includes(friendSearchQuery.toLowerCase());
+                          if (friendsFilter === 'online') {
+                            return presence !== 'Offline' && matchesSearch;
+                          }
+                          return matchesSearch;
+                        })
+                        .map((friend) => {
+                          const presence = onlinePresenceMap[friend._id] || (friend.isOnline ? 'Online' : 'Offline');
+                          return (
+                            <div key={friend._id} className="p-3.5 flex items-center justify-between gap-3 hover:bg-zinc-900/15 transition-all">
+                              <div className="flex items-center gap-3 min-w-0">
+                                <div className="relative shrink-0">
+                                  <div className="w-10 h-10 rounded-xl bg-zinc-800 flex items-center justify-center font-bold text-sm text-zinc-300 overflow-hidden">
+                                    {friend.avatar ? (
+                                      <img src={friend.avatar} alt="" className="w-full h-full object-cover" />
+                                    ) : (
+                                      friend.name.charAt(0)
+                                    )}
+                                  </div>
+                                  <span className={`absolute bottom-[-2px] right-[-2px] w-3 h-3 rounded-full border-2 border-zinc-950 ${presence === 'Online' ? 'bg-emerald-500 glow-green' : presence === 'Away' ? 'bg-amber-500' : presence === 'Busy' ? 'bg-rose-500' : 'bg-zinc-600'}`} />
+                                </div>
+                                <div className="min-w-0">
+                                  <p className="text-xs font-bold text-white truncate">{friend.name}</p>
+                                  <p className="text-[10px] text-zinc-500 truncate leading-relaxed">
+                                    {friend.status || 'Active conversation member'}
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <button
+                                  onClick={() => handleStartDirectChat(friend)}
+                                  className="p-2 rounded-xl bg-indigo-650/20 text-indigo-400 hover:bg-indigo-600 hover:text-white transition-all shadow-sm"
+                                  title="Message"
+                                >
+                                  <MessageSquare className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    if (confirm(`Are you sure you want to unfriend ${friend.name}?`)) {
+                                      handleRemoveFriend(friend._id);
+                                    }
+                                  }}
+                                  className="p-2 rounded-xl bg-zinc-900/60 hover:bg-rose-650 hover:text-white text-zinc-500 transition-all shadow-sm"
+                                  title="Unfriend"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+            </div>
+          </div>
+        )}
+
       </div>
 
       {/* 4. Right Sidebar Members directory (Step 1, 2 Members list) */}
-      <div className="w-64 h-full bg-zinc-950 border-l border-zinc-900/60 flex flex-col shrink-0">
-        <div className="p-4 border-b border-zinc-900/60 flex items-center gap-2 text-white shrink-0">
-          <Users className="w-4 h-4 text-indigo-400" />
-          <span className="text-xs font-bold uppercase tracking-wider">Workspace Directory</span>
-        </div>
+      {activeWorkspace && (
+        <div className="w-64 h-full bg-zinc-950 border-l border-zinc-900/60 flex flex-col shrink-0">
+          <div className="p-4 border-b border-zinc-900/60 flex items-center gap-2 text-white shrink-0">
+            <Users className="w-4 h-4 text-indigo-400" />
+            <span className="text-xs font-bold uppercase tracking-wider">Workspace Directory</span>
+          </div>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          
-          <div className="space-y-3">
-            {workspaceMembersList.map((m) => {
-              const isOwner = m.role === 'Owner';
-              const userPresenceStatus = onlinePresenceMap[m.user._id] || (m.user.isOnline ? 'Online' : 'Offline');
+          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            
+            <div className="space-y-3">
+              {workspaceMembersList.map((m) => {
+                const isOwner = m.role === 'Owner';
+                const userPresenceStatus = onlinePresenceMap[m.user._id] || (m.user.isOnline ? 'Online' : 'Offline');
 
-              return (
-                <div key={m.user._id} className="flex items-center gap-3 p-2 rounded-xl bg-zinc-900/25 border border-transparent hover:border-zinc-900 transition-all group/member">
-                  <div className="relative shrink-0">
-                    <div className="w-8 h-8 rounded-lg overflow-hidden bg-zinc-800">
-                      {m.user.avatar ? (
-                        <img src={m.user.avatar} alt={m.user.name} className="w-full h-full object-cover" />
-                      ) : (
-                        <div className="w-full h-full bg-indigo-950 text-indigo-400 flex items-center justify-center font-bold text-xs">
-                          {m.user.name.charAt(0)}
-                        </div>
-                      )}
+                return (
+                  <div key={m.user._id} className="flex items-center gap-3 p-2 rounded-xl bg-zinc-900/25 border border-transparent hover:border-zinc-900 transition-all group/member">
+                    <div className="relative shrink-0">
+                      <div className="w-8 h-8 rounded-lg overflow-hidden bg-zinc-800">
+                        {m.user.avatar ? (
+                          <img src={m.user.avatar} alt={m.user.name} className="w-full h-full object-cover" />
+                        ) : (
+                          <div className="w-full h-full bg-indigo-950 text-indigo-400 flex items-center justify-center font-bold text-xs">
+                            {m.user.name.charAt(0)}
+                          </div>
+                        )}
+                      </div>
+                      <span className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-zinc-950 ${userPresenceStatus === 'Online' ? 'bg-emerald-500 glow-green' : userPresenceStatus === 'Away' ? 'bg-amber-500' : userPresenceStatus === 'Busy' ? 'bg-rose-500' : 'bg-zinc-600'}`} />
                     </div>
-                    <span className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-zinc-950 ${userPresenceStatus === 'Online' ? 'bg-emerald-500 glow-green' : userPresenceStatus === 'Away' ? 'bg-amber-500' : userPresenceStatus === 'Busy' ? 'bg-rose-500' : 'bg-zinc-600'}`} />
-                  </div>
 
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-1 mb-0.5">
-                      <p className="text-xs font-bold text-white truncate">{m.user.name}</p>
-                      <span className={`text-[8px] px-1.5 py-0.5 rounded font-bold shrink-0 ${getRoleBadgeColor(m.role)}`}>
-                        {m.role}
-                      </span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-1 mb-0.5">
+                        <p className="text-xs font-bold text-white truncate">{m.user.name}</p>
+                        <span className={`text-[8px] px-1.5 py-0.5 rounded font-bold shrink-0 ${getRoleBadgeColor(m.role)}`}>
+                          {m.role}
+                        </span>
+                      </div>
+                      <p className="text-[9px] text-zinc-500 truncate">{m.user.status || 'Active Member'}</p>
                     </div>
-                    <p className="text-[9px] text-zinc-500 truncate">{m.user.status || 'Active Member'}</p>
-                  </div>
 
-                  {/* Option to remove member (only accessible for Owner or Admin, scoped by RBAC Step 2) */}
-                  {['Owner', 'Admin'].includes(activeUserRole) && m.user._id !== user?._id && !isOwner && (
-                    <button
-                      onClick={() => handleRemoveMember(m.user._id)}
-                      className="opacity-0 group-hover/member:opacity-100 p-1 hover:text-rose-400 transition-opacity"
-                      title="Remove Member"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
-                  )}
-                </div>
-              );
-            })}
+                    {/* Option to remove member (only accessible for Owner or Admin, scoped by RBAC Step 2) */}
+                    {['Owner', 'Admin'].includes(activeUserRole) && m.user._id !== user?._id && !isOwner && (
+                      <button
+                        onClick={() => handleRemoveMember(m.user._id)}
+                        className="opacity-0 group-hover/member:opacity-100 p-1 hover:text-rose-400 transition-opacity"
+                        title="Remove Member"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* ==========================================
           WORKSPACE COMPONENT MODALS

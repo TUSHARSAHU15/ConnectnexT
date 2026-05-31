@@ -276,4 +276,71 @@ export const api = {
     });
     return res.json();
   },
+
+  // Friends & DMs (Discord Integration)
+  getFriends: async () => {
+    const res = await fetch(`${API_URL}/friends`, {
+      method: 'GET',
+      headers: getHeaders(),
+    });
+    return res.json();
+  },
+
+  sendFriendRequest: async (email) => {
+    const res = await fetch(`${API_URL}/friends/request`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ email }),
+    });
+    return res.json();
+  },
+
+  getFriendRequests: async () => {
+    const res = await fetch(`${API_URL}/friends/requests`, {
+      method: 'GET',
+      headers: getHeaders(),
+    });
+    return res.json();
+  },
+
+  acceptFriendRequest: async (requestId) => {
+    const res = await fetch(`${API_URL}/friends/requests/${requestId}/accept`, {
+      method: 'PUT',
+      headers: getHeaders(),
+    });
+    return res.json();
+  },
+
+  rejectFriendRequest: async (requestId) => {
+    const res = await fetch(`${API_URL}/friends/requests/${requestId}/reject`, {
+      method: 'PUT',
+      headers: getHeaders(),
+    });
+    return res.json();
+  },
+
+  removeFriend: async (friendId) => {
+    const res = await fetch(`${API_URL}/friends/${friendId}`, {
+      method: 'DELETE',
+      headers: getHeaders(),
+    });
+    return res.json();
+  },
+
+  accessChat: async (userId) => {
+    const res = await fetch(`${API_URL}/chats`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ userId }),
+    });
+    return res.json();
+  },
+
+  getDirectChats: async () => {
+    const res = await fetch(`${API_URL}/chats`, {
+      method: 'GET',
+      headers: getHeaders(),
+    });
+    return res.json();
+  },
 };

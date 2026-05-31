@@ -16,6 +16,7 @@ const workspaceRoutes = require('./routes/workspaceRoutes');
 const kanbanRoutes = require('./routes/kanbanRoutes');
 const meetingRoutes = require('./routes/meetingRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
+const friendRoutes = require('./routes/friendRoutes');
 
 // Load environment variables
 dotenv.config();
@@ -58,6 +59,7 @@ app.use('/api/workspaces', workspaceRoutes);
 app.use('/api/kanban', kanbanRoutes);
 app.use('/api/meetings', meetingRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/friends', friendRoutes);
 
 // Custom Global Error Handler Middleware
 app.use((err, req, res, next) => {

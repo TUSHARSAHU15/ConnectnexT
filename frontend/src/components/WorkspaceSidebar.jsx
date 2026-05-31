@@ -5,7 +5,8 @@ export default function WorkspaceSidebar({
   workspaces,
   activeWorkspace,
   onSelectWorkspace,
-  onCreateWorkspace
+  onCreateWorkspace,
+  onSelectHome
 }) {
   const [showModal, setShowModal] = useState(false);
   const [name, setName] = useState('');
@@ -23,10 +24,16 @@ export default function WorkspaceSidebar({
   return (
     <div className="w-16 h-full bg-zinc-900 border-r border-zinc-800/80 flex flex-col items-center py-6 justify-between shrink-0">
       <div className="flex flex-col gap-4 items-center w-full">
-        {/* Workspace Hub Icon */}
-        <div className="w-10 h-10 rounded-xl bg-indigo-600/20 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
+        {/* Workspace Hub / Home Button (Discord Style Home) */}
+        <button
+          onClick={onSelectHome}
+          className={`relative group flex items-center justify-center w-11 h-11 rounded-xl transition-all duration-300 ${!activeWorkspace ? 'bg-indigo-600 text-white rounded-xl shadow-lg shadow-indigo-500/20' : 'bg-zinc-800 text-zinc-400 hover:bg-indigo-600/20 hover:text-indigo-400 hover:rounded-xl rounded-2xl'}`}
+          title="Home & Friends"
+        >
+          {/* Active Indicator Strip */}
+          <span className={`absolute left-0 w-1 bg-indigo-500 rounded-r-md transition-all duration-300 ${!activeWorkspace ? 'h-5' : 'h-0 group-hover:h-3'}`} />
           <Compass className="w-5 h-5" />
-        </div>
+        </button>
 
         <div className="w-8 h-[1px] bg-zinc-800 my-2" />
 

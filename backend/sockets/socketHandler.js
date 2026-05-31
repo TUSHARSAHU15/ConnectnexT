@@ -125,6 +125,28 @@ const socketHandler = (io) => {
       });
     });
 
+    // Real-time Friend Request Signaling
+    socket.on('new_friend_request', ({ senderId, recipientId, requestData }) => {
+      const recipientSocket = onlineUsers.get(recipientId);
+      if (recipientSocket) {
+        io.to(recipientSocket).emit('friend_request_received', requestData);
+      }
+    });
+
+    socket.on('friend_request_approved', ({ senderId, recipientId, recipientUser }) => {
+      const senderSocket = onlineUsers.get(senderId);
+      if (senderSocket) {
+        io.to(senderSocket).emit('friend_request_accepted', { recipientId, recipientUser });
+      }
+    });
+
+    socket.on('friend_removed', ({ friendId, userId }) => {
+      const friendSocket = onlineUsers.get(friendId);
+      if (friendSocket) {
+        io.to(friendSocket).emit('unfriended_by_user', { userId });
+      }
+    });
+
     socket.on('disconnect', async () => {
       console.log('Socket Disconnected:', socket.id);
       
