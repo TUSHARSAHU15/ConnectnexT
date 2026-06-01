@@ -1,0 +1,97 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexushub-frontend
+  namespace: default
+  labels:
+    app: nexushub-frontend
+spec:
+  replicas: 3 # Scale to 3 frontend pods for high availability
+  selector:
+    matchLabels:
+      app: nexushub-frontend
+  template:
+    metadata:
+      labels:
+        app: nexushub-frontend
+    spec:
+      containers:
+      - name: frontend
+        image: docker.io/username/nexushub-frontend:latest # Update with your registry tag
+        ports:
+        - containerPort: 80
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+          requests:
+            cpu: "250m"
+            memory: "256Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexushub-frontend-service
+  namespace: default
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+    targetPort: 80
+  selector:
+    app: nexushub-frontend
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexushub-backend
+  namespace: default
+  labels:
+    app: nexushub-backend
+spec:
+  replicas: 2 # Scale backend Node pods for socket connections load distribution
+  selector:
+    matchLabels:
+      app: nexushub-backend
+  template:
+    metadata:
+      labels:
+        app: nexushub-backend
+    spec:
+      containers:
+      - name: backend
+        image: docker.io/username/nexushub-backend:latest # Update with your registry tag
+        ports:
+        - containerPort: 5000
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: MONGO_URI
+          value: "mongodb://nexushub-mongodb-service:27017/nexushub"
+        - name: REDIS_URL
+          value: "redis://nexushub-redis-service:6379"
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: nexushub-secrets
+              key: jwt-secret
+        resources:
+          limits:
+            cpu: "1000m"
+            memory: "1024Mi"
+          requests:
+            cpu: "500m"
+            memory: "512Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexushub-backend-service
+  namespace: default
+spec:
+  type: ClusterIP
+  ports:
+  - port: 5000
+    targetPort: 5000
+  selector:
+    app: nexushub-backend

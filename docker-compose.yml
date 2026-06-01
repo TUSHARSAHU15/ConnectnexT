@@ -1,65 +1,71 @@
 version: '3.8'
 
 services:
-  # 1. Database Container (MongoDB)
-  mongo:
-    image: mongo:latest
-    container_name: connectx-mongo
+  # 1. Front-end Nginx Client Service
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nexushub-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - nexushub-network
+    restart: always
+
+  # 2. Back-end Node.js API Service
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: nexushub-backend
+    ports:
+      - "5000:5000"
+    environment:
+      - NODE_ENV=production
+      - PORT=5000
+      - MONGO_URI=mongodb://mongodb:27107/nexushub
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=super_secret_auth_token_key_nexus
+      - OPENAI_API_KEY=mock-key-if-local-testing
+      - PINECONE_API_KEY=mock-key-if-local-testing
+    depends_on:
+      - mongodb
+      - redis
+    networks:
+      - nexushub-network
+    restart: always
+
+  # 3. Mongoose MongoDB Database Engine
+  mongodb:
+    image: mongo:6.0
+    container_name: nexushub-mongodb
     ports:
       - "27017:27017"
     volumes:
       - mongo-data:/data/db
     networks:
-      - connectx-network
+      - nexushub-network
+    restart: always
 
-  # 2. Redis Cache Container (Redis)
+  # 4. Redis Cache / Session PubSub Broker
   redis:
-    image: redis:alpine
-    container_name: connectx-redis
+    image: redis:7.0-alpine
+    container_name: nexushub-redis
     ports:
       - "6379:6379"
+    volumes:
+      - redis-data:/data
     networks:
-      - connectx-network
-
-  # 3. Backend API Container
-  backend:
-    build: ./backend
-    container_name: connectx-backend-service
-    ports:
-      - "5000:5000"
-    environment:
-      - PORT=5000
-      - MONGO_URI=mongodb+srv://Tusharsahu:Tushar15@cluster0.pb2mw.mongodb.net/Connectxweb?retryWrites=true&w=majority&appName=Cluster0
-      - REDIS_URL=redis://redis:6379
-      - JWT_SECRET=connectx_jwt_secret_token_key_12345
-      - FRONTEND_URL=http://localhost:5173
-      - CLOUDINARY_CLOUD_NAME=mock
-      - CLOUDINARY_API_KEY=mock
-      - CLOUDINARY_API_SECRET=mock
-      - OPENAI_API_KEY=mock
-    depends_on:
-      - mongo
-      - redis
-    networks:
-      - connectx-network
-
-  # 4. Frontend Web Container
-  frontend:
-    build: ./frontend
-    container_name: connectx-frontend-web
-    ports:
-      - "5173:5173"
-    environment:
-      - VITE_API_URL=http://localhost:5000/api
-      - VITE_SOCKET_URL=http://localhost:5000
-    depends_on:
-      - backend
-    networks:
-      - connectx-network
+      - nexushub-network
+    restart: always
 
 volumes:
   mongo-data:
+  redis-data:
 
 networks:
-  connectx-network:
+  nexushub-network:
     driver: bridge

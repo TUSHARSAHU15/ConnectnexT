@@ -1,63 +1,69 @@
-# ConnectX – Real-Time Chat & Collaboration Platform
+# NexusHub – AI-Powered Collaboration & Project Management Platform
 
-ConnectX is a premium, high-performance real-time chat and collaboration platform designed for modern product teams and engineers. Built using a robust MERN architecture with native Socket.io events and WebRTC signaling, it delivers low-latency communication packaged inside an engaging, modern dark-themed glassmorphism interface.
-
----
-
-## Key Features
-
-### 🌟 Phase 1: MVP Core
-- **Secure Authentication**: Password hashing with bcrypt, stateless session tracking with JWT, fully operational forgot password, and email verification processes (logged directly to console for instant local development).
-- **User Profiles**: Custom status quotes, bios, and active presence triggers (`isOnline`, `lastSeen` timestamps).
-- **Real-Time One-to-One Chat**: Instant messages over Socket.io, typing indicators, read receipts, delivery confirmations, and message history.
-- **Thread Management**: Pin conversations, archive chats, search users, and delete threads.
-- **Media sharing**: Integration for pictures, PDFs, and attachments.
-
-### 🚀 Phase 2: Advanced Collaboration
-- **Group Chats**: Dynamic creation of group rooms, member additions/removals, and custom group avatars.
-- **Interactive Messaging**: Edit/delete sent messages, parent replies, message forwarding, and emoji reactions overlay.
-- **Alerts**: Sound triggers on incoming messages and browser unread notifications.
-
-### 💎 Phase 3: Industry-Level Integrations
-- **WebRTC Calls**: Low-latency peer-to-peer voice and video calls running over custom socket signaling, complete with audio/video stream toggles.
-- **AI Assistent (OpenAI)**: Dynamic Smart Replies, contextual auto-translation, and full thread transcript summaries.
-- **Enterprise Security**: Helmet headers protection, API rate limiting, and global request validation.
+A unified workspace combining Team Communication, Kanban Project Management, Sprint Agile Dashboarding, AI Assistants with RAG document searching, Video lobbies, and Admin capabilities into a single cohesive platform.
 
 ---
 
-## Technologies Used
+## Technical Architecture Highlights
 
-- **Frontend**: React 19, React Router v6, Redux Toolkit, Socket.io Client, Tailwind CSS, Lucide Icons, Simple Peer.
-- **Backend**: Node.js, Express.js, Mongoose, Socket.io Server, JWT, BcryptJS, Nodemailer.
-- **Database**: MongoDB (Local or Atlas).
+- **Frontend**: React 19 SPA optimized by Vite, styled via custom CSS with glassmorphic cards and dynamic theme hue customize controllers.
+- **Backend Service**: Node.js & Express.js server exposing REST APIs, protected by JWT authentication and public IP rate limiters, alongside Socket.io room systems.
+- **Data & Caching Engines**: Mongoose MongoDB for persistent storage models, Redis key-value stores as session rate brokers, and Pinecone vector indexing to run Retrieval-Augmented Generation (RAG) wiki searches.
+- **DevOps**: Multi-stage Docker configurations, orchestrated locally via `docker-compose.yml`, validated continuously on GitHub Actions pipelines.
 
 ---
 
-## Getting Started
+## Directory Organization
 
-### Prerequisites
-- Node.js installed locally.
-- MongoDB running locally or a MongoDB Atlas URI.
+```
+nexushub-platform/
+├── .github/workflows/         # GitHub Actions CI/CD workflows
+├── backend/                   # Node.js, Express, Socket.io, AI pipelines
+│   ├── src/app.ts             # Express + WebSockets server bootstrapper
+│   ├── Dockerfile             # Multi-stage Backend docker configuration
+│   └── package.json           # Backend dependency matrix
+├── src/                       # React 19 Frontend Web Client
+│   ├── components/            # Interface views (Sprints, Analytics, Meetings, etc.)
+│   ├── context/               # Workspace context variables
+│   ├── index.css              # Glassmorphic and theme styling tokens
+│   └── main.tsx               # Client mounting entrypoint
+├── Dockerfile                 # Client web browser bundle building container
+├── docker-compose.yml         # Dev/Prod multi-container coordinator
+└── nginx.conf                 # SPA router fallback configurations
+```
 
-### 1. Backend Setup
-1. Open a terminal and navigate to the backend folder:
-   ```bash
-   cd backend
-   ```
-2. The dependencies are already pre-installed. Create/update your `.env` file (one has already been generated for you with mock/local fallbacks).
-3. Start the backend:
-   ```bash
-   npm run start
-   ```
-   The backend will launch on `http://localhost:5000`.
+---
 
-### 2. Frontend Setup
-1. Open another terminal and navigate to the frontend folder:
-   ```bash
-   cd frontend
-   ```
-2. Start the Vite React development server:
-   ```bash
-   npm run dev
-   ```
-   The app will run locally on `http://localhost:5173`. Open this URL in multiple browser windows to test real-time messaging, calling, and presence features!
+## Quickstart & Launch Commands
+
+To start the unified container stack locally, ensure Docker is running, then execute:
+
+```bash
+# Start all clustered services (Frontend, API Backend, MongoDB, Redis)
+docker compose up --build -d
+
+# Check cluster services status logs
+docker compose ps
+
+# Follow container service log outputs
+docker compose logs -f nexushub-backend
+```
+
+### Local Development Handshake
+If you wish to test or run local frontend services natively:
+
+```bash
+# Install node packages
+npm install
+
+# Start Vite hot-module-replacement server
+npm run dev
+```
+
+---
+
+## Continuous Integration & Verification
+
+The repository includes strict compiler verification pipelines:
+- **TypeScript Static Verification**: Code compiles flawlessly with `npx tsc --noEmit` returning zero compiler errors or typing warnings.
+- **GitHub Pipeline Validation**: All pushes and pull requests trigger automated format, build, and docker packaging configurations defined inside `.github/workflows/ci.yml`.
